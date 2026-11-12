@@ -4,6 +4,8 @@ import com.example.identityservice.config.SecurityConfig;
 import com.example.identityservice.dto.LoginRequest;
 import com.example.identityservice.dto.LoginResponse;
 import com.example.identityservice.dto.RegisterRequest;
+import com.example.identityservice.dto.TokenRefreshRequest;
+import com.example.identityservice.dto.TokenRefreshResponse;
 import com.example.identityservice.dto.UserResponse;
 import com.example.identityservice.exception.ResourceNotFoundException;
 import com.example.identityservice.service.UserService;
@@ -91,10 +93,10 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("POST /api/auth/login should return 200 OK and accessToken on valid credentials")
+    @DisplayName("POST /api/auth/login should return 200 OK and both accessToken and refreshToken on valid credentials")
     void login_Success() throws Exception {
         LoginRequest request = new LoginRequest("testuser", "securePassword123");
-        LoginResponse response = new LoginResponse("mock.jwt.token", "Bearer");
+        LoginResponse response = new LoginResponse("mock.jwt.token", "mock.uuid.refresh.token", "Bearer");
 
         when(userService.login(any(LoginRequest.class))).thenReturn(response);
 
@@ -103,6 +105,24 @@ class AuthControllerTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.accessToken").value("mock.jwt.token"))
+                .andExpect(jsonPath("$.refreshToken").value("mock.uuid.refresh.token"))
+                .andExpect(jsonPath("$.tokenType").value("Bearer"));
+    }
+
+    @Test
+    @DisplayName("POST /api/auth/refreshtoken should return 200 OK and new access token")
+    void refreshToken_Success() throws Exception {
+        TokenRefreshRequest request = new TokenRefreshRequest("mock.uuid.refresh.token");
+        TokenRefreshResponse response = new TokenRefreshResponse("new.mock.jwt.token", "mock.uuid.refresh.token", "Bearer");
+
+        when(userService.refreshToken(any(TokenRefreshRequest.class))).thenReturn(response);
+
+        mockMvc.perform(post("/api/auth/refreshtoken")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").value("new.mock.jwt.token"))
+                .andExpect(jsonPath("$.refreshToken").value("mock.uuid.refresh.token"))
                 .andExpect(jsonPath("$.tokenType").value("Bearer"));
     }
 

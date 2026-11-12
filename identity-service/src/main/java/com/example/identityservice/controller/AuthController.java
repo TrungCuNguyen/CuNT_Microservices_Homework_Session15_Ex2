@@ -3,6 +3,8 @@ package com.example.identityservice.controller;
 import com.example.identityservice.dto.LoginRequest;
 import com.example.identityservice.dto.LoginResponse;
 import com.example.identityservice.dto.RegisterRequest;
+import com.example.identityservice.dto.TokenRefreshRequest;
+import com.example.identityservice.dto.TokenRefreshResponse;
 import com.example.identityservice.dto.UserResponse;
 import com.example.identityservice.service.UserService;
 import jakarta.validation.Valid;
@@ -29,6 +31,12 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
         LoginResponse response = userService.login(request);
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/refreshtoken")
+    public ResponseEntity<TokenRefreshResponse> refreshToken(@Valid @RequestBody TokenRefreshRequest request) {
+        TokenRefreshResponse response = userService.refreshToken(request);
         return ResponseEntity.ok(response);
     }
 

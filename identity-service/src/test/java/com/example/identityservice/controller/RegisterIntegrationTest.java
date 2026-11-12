@@ -2,7 +2,10 @@ package com.example.identityservice.controller;
 
 import com.example.identityservice.dto.LoginRequest;
 import com.example.identityservice.dto.RegisterRequest;
+import com.example.identityservice.dto.TokenRefreshRequest;
+import com.example.identityservice.entity.RefreshToken;
 import com.example.identityservice.entity.User;
+import com.example.identityservice.repository.RefreshTokenRepository;
 import com.example.identityservice.repository.UserRepository;
 import com.example.identityservice.util.JwtUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -18,7 +21,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.time.Instant;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -39,6 +44,9 @@ class RegisterIntegrationTest {
     private UserRepository userRepository;
 
     @Autowired
+    private RefreshTokenRepository refreshTokenRepository;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     @Autowired
@@ -46,6 +54,7 @@ class RegisterIntegrationTest {
 
     @BeforeEach
     void cleanUp() {
+        refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
     }
 
@@ -108,33 +117,55 @@ class RegisterIntegrationTest {
     }
 
     @Test
-    @DisplayName("Complete Login flow: Register user -> Login with valid credentials -> Expect 200 OK & valid JWT")
+    @DisplayName("Complete Login flow: Register user -> Login -> Verify both AccessToken (JWT) & RefreshToken (UUID in DB)")
     void testLoginFlow_Success() throws Exception {
-        // Register user
+        // 1. Register user
         RegisterRequest registerReq = new RegisterRequest("login_user", "MyPassword123@", "USER");
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(registerReq)))
                 .andExpect(status().isCreated());
 
-        // Login with correct credentials
+        // 2. Login with correct credentials
         LoginRequest loginReq = new LoginRequest("login_user", "MyPassword123@");
         MvcResult result = mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(loginReq)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.accessToken").isNotEmpty())
+                .andExpect(jsonPath("$.refreshToken").isNotEmpty())
                 .andExpect(jsonPath("$.tokenType").value("Bearer"))
                 .andExpect(header().doesNotExist("Set-Cookie")) // Verify Stateless (no JSESSIONID)
                 .andReturn();
 
         String responseBody = result.getResponse().getContentAsString();
-        String token = objectMapper.readTree(responseBody).get("accessToken").asText();
+        String accessToken = objectMapper.readTree(responseBody).get("accessToken").asText();
+        String refreshToken = objectMapper.readTree(responseBody).get("refreshToken").asText();
 
-        // Verify claims in token
-        Claims claims = jwtUtil.extractAllClaims(token);
+        // 3. Verify Access Token claims (sub, role/roles, exp)
+        Claims claims = jwtUtil.extractAllClaims(accessToken);
         assertEquals("login_user", claims.getSubject());
         assertEquals("USER", claims.get("role", String.class));
+        assertEquals("USER", claims.get("roles", String.class));
+
+        // 4. Verify Refresh Token format (valid UUID)
+        assertDoesNotThrow(() -> UUID.fromString(refreshToken));
+
+        // 5. Database Check: Verify record exists in refresh_tokens table in PostgreSQL
+        Optional<RefreshToken> tokenInDb = refreshTokenRepository.findByToken(refreshToken);
+        assertTrue(tokenInDb.isPresent(), "Refresh token record must be stored in database");
+        assertEquals("login_user", tokenInDb.get().getUser().getUsername(), "user_id in refresh_token must link to user");
+        assertTrue(tokenInDb.get().getExpiryDate().isAfter(Instant.now()), "expiry_date must be in the future");
+
+        // 6. Test Token Refresh API endpoint
+        TokenRefreshRequest refreshReq = new TokenRefreshRequest(refreshToken);
+        mockMvc.perform(post("/api/auth/refreshtoken")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(refreshReq)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").isNotEmpty())
+                .andExpect(jsonPath("$.refreshToken").value(refreshToken))
+                .andExpect(jsonPath("$.tokenType").value("Bearer"));
     }
 
     @Test

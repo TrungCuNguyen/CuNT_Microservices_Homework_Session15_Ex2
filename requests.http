@@ -71,5 +71,15 @@ Content-Type: application/json
   "password": "AnyPassword123@"
 }
 
+### 11. Refresh Token để lấy Access Token mới (POST /api/auth/refreshtoken)
+# Thay chuỗi refreshToken bên dưới bằng token nhận được từ mục 8
+POST http://localhost:8080/api/auth/refreshtoken
+Content-Type: application/json
+
+{
+  "refreshToken": "YOUR_REFRESH_TOKEN_UUID_HERE"
+}
+
+
 
 

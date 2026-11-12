@@ -17,30 +17,35 @@ import java.util.Date;
 @Component
 public class JwtUtil {
 
-    @Value("${jwt.secret:${jwt-secret:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}}")
+    @Value("${app.jwt.secret:${jwt.secret:vs6K5vH8N2zB4xR9mQ3pL1wT7yC5vH8N2zB4xR9mQ3pL1wT7yC5vH8N2z}}")
     private String jwtSecret;
 
-    @Value("${jwt.expiration:${jwt-expiration:3600000}}")
+    @Value("${app.jwt.access-token-expiration:${jwt.expiration:900000}}")
     private long jwtExpiration;
 
     /**
-     * Tạo token JWT từ thông tin User:
+     * Triển khai tạo Access Token với thông tin người dùng và vai trò:
      * - Claim sub: username
-     * - Custom claim role: role của user
+     * - Custom claim role & roles: role của user
      * - Thời gian phát hành iat và hết hạn exp
      * - Ký bằng khóa bí mật 256-bit với thuật toán HS256
      */
-    public String generateToken(User user) {
+    public String generateAccessToken(User user) {
         Date now = new Date();
         Date expiryDate = new Date(now.getTime() + jwtExpiration);
 
         return Jwts.builder()
                 .setSubject(user.getUsername())
                 .claim("role", user.getRole())
+                .claim("roles", user.getRole())
                 .setIssuedAt(now)
                 .setExpiration(expiryDate)
                 .signWith(getSigningKey(), SignatureAlgorithm.HS256)
                 .compact();
+    }
+
+    public String generateToken(User user) {
+        return generateAccessToken(user);
     }
 
     public Claims extractAllClaims(String token) {
@@ -84,4 +89,3 @@ public class JwtUtil {
         return Keys.hmacShaKeyFor(keyBytes);
     }
 }
-

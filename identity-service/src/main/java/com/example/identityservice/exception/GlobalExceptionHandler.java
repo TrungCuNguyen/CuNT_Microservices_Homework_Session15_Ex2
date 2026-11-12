@@ -14,6 +14,16 @@ import java.util.Map;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    @ExceptionHandler(TokenRefreshException.class)
+    public ResponseEntity<Map<String, Object>> handleTokenRefreshException(TokenRefreshException ex) {
+        Map<String, Object> error = new HashMap<>();
+        error.put("timestamp", LocalDateTime.now());
+        error.put("status", HttpStatus.FORBIDDEN.value());
+        error.put("error", "Forbidden");
+        error.put("message", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error);
+    }
+
     @ExceptionHandler(org.springframework.security.authentication.BadCredentialsException.class)
     public ResponseEntity<Map<String, Object>> handleBadCredentials(org.springframework.security.authentication.BadCredentialsException ex) {
         Map<String, Object> error = new HashMap<>();
