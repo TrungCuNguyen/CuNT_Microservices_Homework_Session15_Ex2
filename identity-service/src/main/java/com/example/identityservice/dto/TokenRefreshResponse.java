@@ -45,3 +45,4 @@ public class TokenRefreshResponse {
         this.tokenType = tokenType;
     }
 }
+

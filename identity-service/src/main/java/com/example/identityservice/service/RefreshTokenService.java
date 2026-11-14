@@ -9,3 +9,4 @@ public interface RefreshTokenService {
     Optional<RefreshToken> findByToken(String token);
     int deleteByUserId(String userId);
 }
+

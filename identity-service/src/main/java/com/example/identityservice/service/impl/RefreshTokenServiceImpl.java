@@ -69,3 +69,4 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
         return refreshTokenRepository.deleteByUser(user);
     }
 }
+

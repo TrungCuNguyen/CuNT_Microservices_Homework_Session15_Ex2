@@ -16,3 +16,4 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Stri
     @Modifying
     int deleteByUser(User user);
 }
+

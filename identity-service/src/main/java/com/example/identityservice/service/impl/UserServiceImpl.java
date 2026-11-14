@@ -29,9 +29,9 @@ public class UserServiceImpl implements UserService {
     private final RefreshTokenService refreshTokenService;
 
     public UserServiceImpl(UserRepository userRepository,
-                            PasswordEncoder passwordEncoder,
-                            JwtUtils jwtUtils,
-                            RefreshTokenService refreshTokenService) {
+            PasswordEncoder passwordEncoder,
+            JwtUtils jwtUtils,
+            RefreshTokenService refreshTokenService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtUtils = jwtUtils;
