@@ -10,3 +10,4 @@ class GatewayServiceApplicationTests {
     void contextLoads() {
     }
 }
+

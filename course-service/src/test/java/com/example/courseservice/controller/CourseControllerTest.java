@@ -26,3 +26,4 @@ class CourseControllerTest {
                 .andExpect(jsonPath("$.total").value(3));
     }
 }
+

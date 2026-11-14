@@ -10,3 +10,4 @@ class CourseServiceApplicationTests {
     void contextLoads() {
     }
 }
+
