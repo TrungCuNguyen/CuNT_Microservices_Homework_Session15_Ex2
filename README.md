@@ -1,185 +1,165 @@
-# Identity Service - Hệ Thống Microservices (Session 13)
+# Hệ Thống Microservices - Security & API Gateway (Session 13)
 
-Dự án triển khai **Identity Service** ("Phòng quản lý nhân khẩu" trong hệ thống Microservices), đảm nhiệm toàn bộ quy trình quản lý danh tính và cấp phát token:
-1. **Bài 1**: Đăng ký và lưu trữ tài khoản người dùng an toàn với mật khẩu băm BCrypt trong PostgreSQL.
-2. **Bài 2**: Phát hành "tấm thẻ" (JWT Token) chứa thông tin `sub` (username) và `role` để người dùng xác thực với các service khác trong hệ thống.
-3. **Bài 3**: API Đăng nhập (`POST /api/auth/login`), kiến trúc Stateless (không lưu Session/JSESSIONID), đối soát mật khẩu an toàn bằng `passwordEncoder.matches()` và phản hồi `401 Bad credentials` khi thông tin không khớp.
-4. **Cặp bài trùng Access Token & Refresh Token**:
-   - **Access Token**: JWT, thời gian sống ngắn (15 phút = 900.000ms), chứa claims (`sub`, `role`, `roles`, `exp`), dùng để gọi API.
-   - **Refresh Token**: Chuỗi định danh ngẫu nhiên (UUID), thời gian sống dài (7 ngày = 604.800.000ms), lưu trong bảng `refresh_tokens` trong PostgreSQL, dùng để lấy Access Token mới qua API `/api/auth/refreshtoken`.
+Dự án triển khai kiến trúc bảo mật Microservices hoàn chỉnh gồm 3 service:
+1. **`identity-service` (Port 8080)**: "Phòng quản lý nhân khẩu", xử lý đăng ký tài khoản (mã hóa BCrypt lưu PostgreSQL), đăng nhập Stateless, cấp cặp bài trùng Access Token (JWT) & Refresh Token (UUID lưu DB), làm mới Access Token (`/refreshtoken`).
+2. **`gateway-service` (Port 8088)**: "Cổng kiểm soát an ninh" (Spring Cloud Gateway), định tuyến request tới các microservices phía sau. Chặn các request gửi tới `/api/courses/**` bằng **Global Filter**, dùng chung Secret Key với `identity-service` để giải mã JWT, bắt lỗi 401 Unauthorized nếu thiếu/hết hạn/sai chữ ký, và trích xuất `role` gắn vào header `X-User-Role` trước khi forward.
+3. **`course-service` (Port 8082)**: Microservice tài nguyên nghiệp vụ (Resource Service), cung cấp API `/api/courses/**` nhận `X-User-Role` từ Gateway để xử lý nghiệp vụ.
 
 ---
 
-## 1. Cấu Trúc Dự Án
+## 1. Cấu Trúc Tổng Thể Microservices
 
 ```
 ex_ss13_micro/
 ├── .gitignore                      # Chỉ commit source code & cấu hình cần thiết
 ├── docker-compose.yml              # Khởi chạy PostgreSQL (identity_db) độc lập
-├── settings.gradle                 # Quản lý module identity-service
+├── settings.gradle                 # Quản lý 3 module services
 ├── gradlew / gradlew.bat           # Gradle Wrapper
-├── requests.http                   # File test API sẵn sàng cho VS Code / IntelliJ
+├── requests.http                   # File test API sẵn sàng cho VS Code / IntelliJ / Postman
 ├── README.md                       # Tài liệu hướng dẫn chi tiết
-└── identity-service/
-    ├── build.gradle                # Khai báo dependencies Spring Boot, Security, JPA, JJWT, PostgreSQL
-    └── src/
-        ├── main/
-        │   ├── java/com/example/identityservice/
-        │   │   ├── IdentityServiceApplication.java
-        │   │   ├── config/
-        │   │   │   └── SecurityConfig.java         # Stateless Session & permitAll auth endpoints
-        │   │   ├── controller/
-        │   │   │   └── AuthController.java         # /register, /login, /refreshtoken, /test-token
-        │   │   ├── dto/
-        │   │   │   ├── RegisterRequest.java        # Request đăng ký
-        │   │   │   ├── LoginRequest.java           # Request đăng nhập (username, password)
-        │   │   │   ├── LoginResponse.java          # Response đăng nhập (accessToken, refreshToken, tokenType Bearer)
-        │   │   │   ├── TokenRefreshRequest.java    # Request làm mới token (refreshToken)
-        │   │   │   ├── TokenRefreshResponse.java   # Response làm mới token
-        │   │   │   └── UserResponse.java           # Response không chứa password
-        │   │   ├── entity/
-        │   │   │   ├── User.java                   # Entity User (id UUID, username, password, role)
-        │   │   │   └── RefreshToken.java           # Entity RefreshToken (id, token UUID, expiryDate, user_id)
-        │   │   ├── exception/
-        │   │   │   ├── DuplicateResourceException.java
-        │   │   │   ├── ResourceNotFoundException.java
-        │   │   │   ├── TokenRefreshException.java
-        │   │   │   └── GlobalExceptionHandler.java # Xử lý 401 Bad credentials, 403, 404, 409, 400
-        │   │   ├── repository/
-        │   │   │   ├── UserRepository.java
-        │   │   │   └── RefreshTokenRepository.java
-        │   │   ├── service/
-        │   │   │   ├── UserService.java
-        │   │   │   ├── RefreshTokenService.java
-        │   │   │   └── impl/
-        │   │   │       ├── UserServiceImpl.java    # Xác thực BCrypt & cấp cặp AccessToken + RefreshToken
-        │   │   │       └── RefreshTokenServiceImpl.java # Quản lý vòng đời RefreshToken trong DB
-        │   │   └── util/
-        │   │       ├── JwtUtil.java                # Tạo & giải mã JWT Token (HS256, claim sub, role/roles)
-        │   │       └── JwtUtils.java               # Boilerplate helper cho generateAccessToken
-        │   └── resources/
-        │       └── application.yml                 # Cấu hình PostgreSQL & TTL token
-        └── test/
-            └── java/com/example/identityservice/
-                ├── IdentityServiceApplicationTests.java
-                ├── controller/
-                │   ├── AuthControllerTest.java     # Test controller endpoints
-                │   └── RegisterIntegrationTest.java# Test End-to-End đầy đủ luồng Register, Login & Refresh
-                ├── service/
-                │   ├── UserServiceTest.java
-                │   └── RefreshTokenServiceTest.java# Test tạo UUID token & kiểm tra hết hạn
-                └── util/
-                    └── JwtUtilTest.java            # Test sinh token, claim sub, role, TTL 15 phút
+├── identity-service/               # [Port 8080] Auth, BCrypt, PostgreSQL, JWT & Refresh Token
+├── gateway-service/                # [Port 8088] Spring Cloud Gateway, Global Filter, JWT verify & header mutation
+└── course-service/                 # [Port 8082] Resource Service nhận forward & header X-User-Role
 ```
 
 ---
 
-## 2. Cấu Hình Hệ Thống (`application.yml`)
+## 2. Chi Tiết Các Services
 
+### 2.1. Gateway Service (`gateway-service` - Port 8088)
+- **Database**: KHÔNG.
+- **Dependencies**:
+  - `org.springframework.cloud:spring-cloud-starter-gateway`
+  - `io.jsonwebtoken:jjwt-api:0.11.5` (kèm `jjwt-impl` và `jjwt-jackson`)
+- **Gateway Routing (`application.yml`)**:
+  ```yaml
+  spring:
+    cloud:
+      gateway:
+        routes:
+          - id: course-service
+            uri: http://localhost:8082
+            predicates:
+              - Path=/api/courses/**
+          - id: identity-service
+            uri: http://localhost:8080
+            predicates:
+              - Path=/api/auth/**
+  ```
+- **Global Filter (`JwtAuthenticationFilter.java`)**:
+  - Chặn các request có path `/api/courses/**`.
+  - Trích xuất token từ header `Authorization: Bearer <token>`.
+  - Giải mã bằng Secret Key dùng chung với `identity-service`.
+  - Nếu token thiếu, hết hạn (`ExpiredJwtException`) hoặc sai chữ ký (`SignatureException`): Trả về HTTP **`401 Unauthorized`** ngay lập tức.
+  - Nếu token hợp lệ: Trích xuất `role` từ Payload, mutate request gắn thêm header **`X-User-Role`** rồi forward xuống `course-service`.
+
+### 2.2. Course Service (`course-service` - Port 8082)
+- **Port**: `8082`.
+- **API Endpoint**: `GET /api/courses` & `GET /api/courses/{id}`.
+- Nhận header `X-User-Role` được chuyển tiếp từ Gateway và trả về danh sách khóa học kèm thông tin quyền hạn truy cập.
+
+### 2.3. Identity Service (`identity-service` - Port 8080)
+- **Port**: `8080`.
+- **Database**: PostgreSQL (`identity_db`).
+- **Các Endpoint**:
+  - `POST /api/auth/register`: Đăng ký tài khoản (lưu BCrypt hash).
+  - `POST /api/auth/login`: Đăng nhập, trả về cặp `accessToken` (15 phút) và `refreshToken` (7 ngày).
+  - `POST /api/auth/refreshtoken`: Dùng `refreshToken` lấy `accessToken` mới.
+  - `GET /api/auth/test-token?username={name}`: Cấp token test.
+
+---
+
+## 3. Cấu Hình Khóa Bí Mật Dùng Chung (Shared Secret Key)
+
+Cả `identity-service` và `gateway-service` cùng sử dụng chung Secret Key 256-bit:
 ```yaml
-server:
-  port: 8080
-
-spring:
-  application:
-    name: identity-service
-  datasource:
-    url: jdbc:postgresql://localhost:5432/identity_db
-    username: postgres
-    password: ${POSTGRES_PASSWORD:17111998}
-    driver-class-name: org.postgresql.Driver
-  jpa:
-    hibernate:
-      ddl-auto: update
-
 app:
   jwt:
     secret: "vs6K5vH8N2zB4xR9mQ3pL1wT7yC5vH8N2zB4xR9mQ3pL1wT7yC5vH8N2z"
-    access-token-expiration: 900000 # 15 phút (900.000 ms)
-    refresh-token-expiration: 604800000 # 7 ngày (604.800.000 ms)
 ```
 
 ---
 
-## 3. Chi Tiết Triển Khai Kỹ Thuật
+## 4. Hướng Dẫn Khởi Chạy & Kiểm Thử
 
-### 3.1. Entity `RefreshToken` & Database PostgreSQL
-- **Bảng**: `refresh_tokens`
-- **Cấu trúc trường**:
-  - `id`: VARCHAR(255), Primary Key.
-  - `token`: VARCHAR(255), UNIQUE, NOT NULL (chuỗi UUID ngẫu nhiên).
-  - `expiry_date`: TIMESTAMP WITH TIME ZONE, NOT NULL (thời điểm hết hạn sau 7 ngày).
-  - `user_id`: VARCHAR(255), Foreign Key tham chiếu `users(id)`.
-
-Kiểm tra bằng SQL:
-```sql
-SELECT * FROM refresh_tokens;
-```
-
-### 3.2. Lớp `JwtUtils` (`generateAccessToken(User user)`)
-- Tạo chuỗi JWT với thời gian sống 15 phút (900.000ms).
-- Ký bảo mật với thuật toán HS256 và khóa 256-bit.
-- **Payload**:
-  - `sub`: username của người dùng.
-  - `role` & `roles`: quyền hạn của người dùng.
-  - `iat`: thời điểm khởi tạo.
-  - `exp`: thời điểm hết hạn.
-
-### 3.3. Dịch vụ `RefreshTokenService`
-- `createRefreshToken(userId)`: Tạo chuỗi `UUID.randomUUID()`, tính toán `expiryDate` theo cấu hình, cập nhật hoặc thêm mới vào bảng `refresh_tokens`.
-- `verifyExpiration(token)`: Kiểm tra token có quá hạn so với thời gian hiện tại không; nếu hết hạn thì xóa khỏi DB và ném `TokenRefreshException`.
-
-### 3.4. API Endpoints
-
-| Method | Endpoint | Mô tả | Yêu cầu kết quả |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/api/auth/register` | Đăng ký người dùng | HTTP 201 Created (lưu hash BCrypt, trả về user không kèm password) |
-| `POST` | `/api/auth/login` | Đăng nhập tài khoản | HTTP 200 OK kèm cả `accessToken` và `refreshToken` (hoặc 401 Unauthorized nếu sai) |
-| `POST` | `/api/auth/refreshtoken`| Đổi Access Token mới | HTTP 200 OK kèm `accessToken` mới |
-| `GET` | `/api/auth/test-token?username={name}` | Sinh JWT Token trực tiếp | HTTP 200 OK chuỗi JWT (hoặc 404 nếu không thấy user) |
-
----
-
-## 4. Hướng Dẫn Chạy & Kiểm Thử
-
-### Khởi chạy ứng dụng:
+### 4.1. Khởi chạy 3 Services
 ```powershell
+# Chạy Identity Service (Terminal 1)
 .\gradlew.bat :identity-service:bootRun
+
+# Chạy Course Service (Terminal 2)
+.\gradlew.bat :course-service:bootRun
+
+# Chạy Gateway Service (Terminal 3)
+.\gradlew.bat :gateway-service:bootRun
 ```
 
-### Chạy toàn bộ Test tự động (100% PASS):
+### 4.2. Chạy toàn bộ Test tự động (100% PASS)
 ```powershell
-.\gradlew.bat :identity-service:test
+.\gradlew.bat test
 ```
 
-### Kiểm tra bằng `requests.http` hoặc Postman:
-1. **Đăng nhập**:
-   ```http
-   POST http://localhost:8080/api/auth/login
-   Content-Type: application/json
+### 4.3. Kịch bản kiểm thử với Postman / `requests.http`
 
-   {
-     "username": "user_demo",
-     "password": "Password123@"
-   }
-   ```
-   **Phản hồi (200 OK)**:
-   ```json
-   {
-     "accessToken": "eyJhbGciOiJIUzI1NiJ9...",
-     "refreshToken": "48fe7e32-a5e2-4978-83b3-855bc9bfeec0",
-     "tokenType": "Bearer"
-   }
-   ```
+#### Bước 1: Đăng nhập lấy Access Token
+```http
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
 
-2. **Kiểm tra Access Token trên `jwt.io`**:
-   Dán `accessToken` vào [jwt.io](https://jwt.io), kiểm tra Payload có đúng:
-   ```json
-   {
-     "sub": "user_demo",
-     "role": "USER",
-     "roles": "USER",
-     "iat": 1731427200,
-     "exp": 1731428100
-   }
-   ```
+{
+  "username": "user_demo",
+  "password": "Password123@"
+}
+```
+Nhận chuỗi `accessToken`.
+
+#### Bước 2: Gọi Gateway KHÔNG đính kèm Access Token (Kỳ vọng 401 Bị chặn)
+```http
+GET http://localhost:8088/api/courses
+```
+**Phản hồi (401 Unauthorized)**:
+```json
+{
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Missing Authorization Header"
+}
+```
+
+#### Bước 3: Gọi Gateway với Token sai / hết hạn (Kỳ vọng 401 Bị chặn)
+```http
+GET http://localhost:8088/api/courses
+Authorization: Bearer invalid.token.signature12345
+```
+**Phản hồi (401 Unauthorized)**:
+```json
+{
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Invalid token signature"
+}
+```
+
+#### Bước 4: Gọi Gateway với Access Token hợp lệ (Kỳ vọng 200 OK & Header X-User-Role)
+```http
+GET http://localhost:8088/api/courses
+Authorization: Bearer <dán accessToken từ Bước 1>
+```
+**Phản hồi (200 OK)**:
+```json
+{
+  "roleReceivedInCourseService": "USER",
+  "total": 3,
+  "courses": [
+    {
+      "id": 1,
+      "title": "Spring Boot & Microservices Masterclass",
+      "instructor": "Rikkei Academy",
+      "durationHours": 40,
+      "userRole": "USER"
+    },
+    ...
+  ]
+}
+```
+=> Gateway đã giải mã thành công JWT, lấy ra `role: USER` và gắn vào header `X-User-Role` khi forward request xuống Course Service!

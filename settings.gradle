@@ -1,4 +1,5 @@
 rootProject.name = 'ex_ss13_micro'
 
 include 'identity-service'
-
+include 'gateway-service'
+include 'course-service'

@@ -80,6 +80,27 @@ Content-Type: application/json
   "refreshToken": "YOUR_REFRESH_TOKEN_UUID_HERE"
 }
 
+### =========================================================================
+### GATEWAY-SERVICE (Port 8088) & COURSE-SERVICE (Port 8082)
+### =========================================================================
+
+### 12. Gọi qua Gateway KHÔNG có Access Token (Kỳ vọng 401 Unauthorized - Bị chặn ngay)
+GET http://localhost:8088/api/courses
+
+### 13. Gọi qua Gateway với Token không hợp lệ / sai chữ ký (Kỳ vọng 401 Unauthorized)
+GET http://localhost:8088/api/courses
+Authorization: Bearer invalid.token.signature12345
+
+### 14. Gọi qua Gateway với Access Token hợp lệ (Kỳ vọng 200 OK & nhận header X-User-Role)
+# Dán token lấy được từ mục 8 vào Bearer token dưới đây
+GET http://localhost:8088/api/courses
+Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
+
+### 15. Lấy chi tiết khóa học qua Gateway (Kỳ vọng 200 OK)
+GET http://localhost:8088/api/courses/1
+Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
+
+
 
 
 
